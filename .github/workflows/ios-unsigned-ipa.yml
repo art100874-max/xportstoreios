@@ -1,0 +1,113 @@
+name: iOS unsigned .ipa (Briefcase → AltStore/Sideloadly)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    env:
+      PYTHON_VERSION: "3.11"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install Briefcase
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install briefcase
+
+      - name: Generate iOS project (Briefcase)
+        run: |
+          briefcase create iOS
+          briefcase build iOS
+
+      - name: Locate Xcode project/workspace and scheme
+        id: xcode_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE_PATH="$(find build -type d -iname '*.xcworkspace' -not -path '*/DerivedData/*' -not -path '*/XCBuildData/*' | head -n 1 || true)"
+          PROJECT_PATH="$(find build -type d -iname '*.xcodeproj'   -not -path '*/DerivedData/*' -not -path '*/XCBuildData/*' | head -n 1 || true)"
+          if [[ -n "$WORKSPACE_PATH" ]]; then
+            XCODE_FLAG="-workspace"; XCODE_PATH="$WORKSPACE_PATH"
+          elif [[ -n "$PROJECT_PATH" ]]; then
+            XCODE_FLAG="-project";  XCODE_PATH="$PROJECT_PATH"
+          else
+            echo "No .xcworkspace or .xcodeproj under ./build" >&2
+            exit 1
+          fi
+          echo "xcode_flag=$XCODE_FLAG" >> "$GITHUB_OUTPUT"
+          echo "xcode_path=$XCODE_PATH" >> "$GITHUB_OUTPUT"
+
+          SCHEMES_JSON="$(xcodebuild -list -json $XCODE_FLAG "$XCODE_PATH")"
+          SCHEME_NAME="$(python -c 'import sys,json; d=json.load(sys.stdin); s=(d.get("workspace",{}).get("schemes") or d.get("project",{}).get("schemes") or []); print(s[0] if s else "")' <<<"$SCHEMES_JSON")"
+          if [[ -z "$SCHEME_NAME" ]]; then
+            echo "No Xcode scheme found (make it Shared in Xcode)." >&2
+            exit 2
+          fi
+          echo "scheme=$SCHEME_NAME" >> "$GITHUB_OUTPUT"
+          echo "Using: $XCODE_FLAG $XCODE_PATH | scheme: $SCHEME_NAME"
+
+      - name: Archive (Release, ad-hoc for packaging)
+        id: archive
+        run: |
+          set -euo pipefail
+          mkdir -p output logs
+          ARCHIVE_PATH="$PWD/output/App.xcarchive"
+
+          xcodebuild \
+            ${{ steps.xcode_meta.outputs.xcode_flag }} "${{ steps.xcode_meta.outputs.xcode_path }}" \
+            -scheme "${{ steps.xcode_meta.outputs.scheme }}" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
+            clean archive | tee logs/xcodebuild-archive.log
+
+          echo "archive_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-archive-log
+          path: logs/xcodebuild-archive.log
+          if-no-files-found: warn
+
+      - name: Make unsigned .ipa
+        run: |
+          set -euo pipefail
+          APP_PATH="$(/bin/ls -1d "${{ steps.archive.outputs.archive_path }}"/Products/Applications/*.app | head -n 1)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "No .app found in archive." >&2
+            exit 1
+          fi
+          mkdir -p output/Payload
+          cp -R "$APP_PATH" output/Payload/
+          (cd output && /usr/bin/zip -qry app-unsigned.ipa Payload)
+
+      - name: Upload unsigned .ipa and archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa-and-archive
+          path: |
+            output/app-unsigned.ipa
+            output/App.xcarchive
