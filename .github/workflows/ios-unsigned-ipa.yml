@@ -33,8 +33,22 @@ jobs:
       - name: Locate Xcode project
         id: xcode_meta
         run: |
-          PROJECT_PATH=$(find build -type d -name "*.xcodeproj" | head -n 1)
-          SCHEME_NAME=$(basename "$PROJECT_PATH" .xcodeproj)
+          set -euo pipefail
+
+          PROJECT_PATH=$(find build/xportstore/ios/xcode -maxdepth 1 -type d -name "*.xcodeproj" | head -n 1)
+          if [ -z "$PROJECT_PATH" ]; then
+            echo "No top-level XPort Store Xcode project found" >&2
+            find build/xportstore/ios/xcode -maxdepth 2 -type d -name "*.xcodeproj" -print >&2
+            exit 1
+          fi
+
+          SCHEMES_JSON=$(xcodebuild -list -json -project "$PROJECT_PATH")
+          SCHEME_NAME=$(python -c 'import json,sys; d=json.load(sys.stdin); s=d.get("project",{}).get("schemes",[]); print(s[0] if s else "")' <<<"$SCHEMES_JSON")
+          if [ -z "$SCHEME_NAME" ]; then
+            echo "No shared scheme found in $PROJECT_PATH" >&2
+            exit 1
+          fi
+
           echo "xcode_path=$PROJECT_PATH" >> $GITHUB_OUTPUT
           echo "scheme=$SCHEME_NAME" >> $GITHUB_OUTPUT
           echo "Found project: $PROJECT_PATH, scheme: $SCHEME_NAME"
@@ -55,6 +69,7 @@ jobs:
 
       - name: Package unsigned .ipa
         run: |
+          set -euo pipefail
           mkdir -p output/Payload
           APP_PATH=$(find output/App.xcarchive/Products/Applications -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
@@ -62,9 +77,28 @@ jobs:
             exit 1
           fi
           echo "✅ Found app: $APP_PATH"
+
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")
+          DISPLAY_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_PATH/Info.plist")
+
+          if [[ "$BUNDLE_ID" == "org.python.iOSTestbed" || "$DISPLAY_NAME" == "iOSTestbed" ]]; then
+            echo "❌ Refusing to package the Python support testbed." >&2
+            exit 2
+          fi
+          if [[ "$APP_VERSION" != "1.1.0" ]]; then
+            echo "❌ Unexpected app version: $APP_VERSION" >&2
+            exit 3
+          fi
+          if ! find "$APP_PATH" -type d -name xportstore -print -quit | grep -q .; then
+            echo "❌ XPort Store Python package is missing from the archive." >&2
+            exit 4
+          fi
+
+          echo "✅ Validated XPort Store: $DISPLAY_NAME ($BUNDLE_ID), version $APP_VERSION"
           cp -R "$APP_PATH" output/Payload/
           cd output
-          zip -qry app-unsigned.ipa Payload
+          zip -qry XPortStore-iOS-1.1.0-unsigned.ipa Payload
           echo "✅ Created unsigned .ipa successfully."
 
       - name: Upload unsigned .ipa and archive
@@ -72,5 +106,5 @@ jobs:
         with:
           name: ios-unsigned-ipa-and-archive
           path: |
-            output/app-unsigned.ipa
+            output/XPortStore-iOS-1.1.0-unsigned.ipa
             output/App.xcarchive

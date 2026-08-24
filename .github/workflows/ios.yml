@@ -42,9 +42,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Searching for Xcode project/workspace under ./build ..."
-          WORKSPACE_PATH="$(find build -type d -iname '*.xcworkspace' -not -path '*/DerivedData/*' -not -path '*/XCBuildData/*' | head -n 1 || true)"
-          PROJECT_PATH="$(find build -type d -iname '*.xcodeproj'   -not -path '*/DerivedData/*' -not -path '*/XCBuildData/*' | head -n 1 || true)"
+          XCODE_ROOT="build/xportstore/ios/xcode"
+          echo "Searching for the top-level XPort Store project/workspace under $XCODE_ROOT ..."
+          WORKSPACE_PATH="$(find "$XCODE_ROOT" -maxdepth 1 -type d -iname '*.xcworkspace' | head -n 1 || true)"
+          PROJECT_PATH="$(find "$XCODE_ROOT" -maxdepth 1 -type d -iname '*.xcodeproj' | head -n 1 || true)"
 
           echo "Candidate workspace: ${WORKSPACE_PATH:-<none>}"
           echo "Candidate project:   ${PROJECT_PATH:-<none>}"
@@ -58,7 +59,7 @@ jobs:
             XCODE_PATH="$PROJECT_PATH"
             XCODE_KIND="project"
           else
-            echo "No .xcworkspace or .xcodeproj found under ./build" >&2
+            echo "No top-level .xcworkspace or .xcodeproj found under $XCODE_ROOT" >&2
             echo "Directory snapshot (depth 4) for diagnostics:" >&2
             find build -maxdepth 4 -type d -print | sed 's/^/  /' >&2
             exit 1
