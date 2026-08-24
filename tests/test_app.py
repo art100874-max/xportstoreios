@@ -1,9 +1,11 @@
 import ast
 from pathlib import Path
+import tomllib
 
 
 APP_SOURCE = Path(__file__).parents[1] / "src" / "xportstore" / "app.py"
 ANDROID_OVERLAY = Path(__file__).parents[1] / "android-overlay" / "app" / "src" / "main"
+PROJECT_CONFIG = Path(__file__).parents[1] / "pyproject.toml"
 
 
 def _app_constants():
@@ -44,3 +46,9 @@ def test_android_wrapper_is_secure_and_does_not_modify_the_site_dom():
     assert "MIXED_CONTENT_ALWAYS_ALLOW" not in activity
     assert "setUserAgentString" not in activity
     assert "evaluateJavascript" not in activity
+
+
+def test_bundle_name_is_ascii_and_sideload_safe():
+    config = tomllib.loads(PROJECT_CONFIG.read_text(encoding="utf-8"))
+    assert config["tool"]["briefcase"]["project_name"] == "XPort Store"
+    assert config["tool"]["briefcase"]["app"]["xportstore"]["formal_name"] == "XPort Store"

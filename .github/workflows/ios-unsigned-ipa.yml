@@ -90,9 +90,13 @@ jobs:
             echo "❌ Unexpected app version: $APP_VERSION" >&2
             exit 3
           fi
+          if [[ "$DISPLAY_NAME" != "XPort Store" ]]; then
+            echo "❌ Unexpected display name: $DISPLAY_NAME" >&2
+            exit 4
+          fi
           if ! find "$APP_PATH" -type d -name xportstore -print -quit | grep -q .; then
             echo "❌ XPort Store Python package is missing from the archive." >&2
-            exit 4
+            exit 5
           fi
 
           echo "✅ Validated XPort Store: $DISPLAY_NAME ($BUNDLE_ID), version $APP_VERSION"
