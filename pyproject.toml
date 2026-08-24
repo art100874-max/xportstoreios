@@ -2,7 +2,7 @@
 [tool.briefcase]
 project_name = "X-Port - техника и аксессуары"
 bundle = "ru.xportstore"
-version = "1.0.0"
+version = "1.1.0"
 url = "https://xportstore.ru"
 license.file = "LICENSE"
 author = "X-Port"
